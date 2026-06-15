@@ -1,0 +1,168 @@
+requests
+beautifulsoup4
+lxml
+
+
+import random
+import time
+import requests
+
+
+class ProxyManager:
+    def __init__(self, proxies):
+        self.proxies = proxies
+        self.failed = {}
+
+    def get_proxy(self):
+        available = [
+            p for p in self.proxies
+            if p not in self.failed or time.time() > self.failed[p]
+        ]
+
+        if not available:
+            available = self.proxies
+
+        return random.choice(available)
+
+    def mark_failed(self, proxy):
+        self.failed[proxy] = time.time() + 300
+
+    def test_proxy(self, proxy):
+        try:
+            response = requests.get(
+                "https://httpbin.org/ip",
+                proxies={
+                    "http": proxy,
+                    "https": proxy
+                },
+                timeout=5
+            )
+
+            return response.status_code == 200
+
+        except Exception:
+            return False
+
+
+              import json
+import time
+import random
+import requests
+
+from bs4 import BeautifulSoup
+from proxy_manager import ProxyManager
+
+
+TARGET_URL = "https://example.com"
+
+PROXIES = [
+    "http://proxy1:port",
+    "http://proxy2:port",
+    "http://proxy3:port"
+]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+MAX_RETRIES = 5
+
+
+class RotatingScraper:
+
+    def __init__(self):
+        self.proxy_manager = ProxyManager(PROXIES)
+        self.session = requests.Session()
+
+    def fetch(self, url):
+
+        for attempt in range(MAX_RETRIES):
+
+            proxy = self.proxy_manager.get_proxy()
+
+            proxy_dict = {
+                "http": proxy,
+                "https": proxy
+            }
+
+            try:
+                response = self.session.get(
+                    url,
+                    headers=HEADERS,
+                    proxies=proxy_dict,
+                    timeout=15
+                )
+
+                if response.status_code == 200:
+                    return response.text
+
+                if response.status_code in [403, 429, 500, 502, 503]:
+                    raise Exception(
+                        f"Bad response {response.status_code}"
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"Attempt {attempt+1} failed "
+                    f"using {proxy}: {e}"
+                )
+
+                self.proxy_manager.mark_failed(proxy)
+
+                wait = (2 ** attempt) + random.uniform(0, 1)
+
+                time.sleep(wait)
+
+        return None
+
+    def parse(self, html):
+
+        soup = BeautifulSoup(html, "lxml")
+
+        data = {
+            "title": (
+                soup.title.text.strip()
+                if soup.title else ""
+            ),
+            "links": [
+                a.get("href")
+                for a in soup.find_all("a", href=True)
+            ]
+        }
+
+        return data
+
+    def save(self, data):
+
+        with open(
+            "output.json",
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                indent=4,
+                ensure_ascii=False
+            )
+
+    def run(self):
+
+        html = self.fetch(TARGET_URL)
+
+        if not html:
+            print("Unable to fetch page")
+            return
+
+        data = self.parse(html)
+
+        self.save(data)
+
+        print("Scraping completed")
+
+
+if __name__ == "__main__":
+    scraper = RotatingScraper()
+    scraper.run()
